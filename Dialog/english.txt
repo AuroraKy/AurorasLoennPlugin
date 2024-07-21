@@ -1,0 +1,1 @@
+aurorasloennplugin_modsettings_loennoverride= If enabled this plugin runs without confirming if loenn is open, this will disable if you close the game.

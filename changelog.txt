@@ -1,0 +1,52 @@
+
+0.9.0
+loenn 0.8 update
+
+0.8.0
+Added Cache Decals option 
+
+0.7.1
+Fix a potential bug where line number isn't a number (?)
+
+0.7.0 
+add the 3 scripts
+
+0.6.3 
+Add pufferbowl silhouette offset
+
+
+0.6.2
+should no longer stop working for small loenn updates (only minor versions)
+
+[ ] make lua threads return false again after it's fixed (instead of {false})
+[ ] fix the lag issue
+[ ] change how it detects loenn maybe?
+0.5.2
+Change vertical drawing offset for DreamJellies specifically
+
+0.5.1
+Rewrote how it works again idk maybe it helps
+
+0.5.0
+Makes sure all silhouettes shown are unique. (Standing on a spring no longer generates thousands of silhouettes)
+Improve how Silhouettes are loaded in loenn (it now requests and creates them in chunks if possible)
+Now only invalidates debugrc existence if last debugrc request is 15s old (loenn send 1 per second)
+
+0.4.1
+Added DoNotCheckForLoenn toggle which resets everytime you close the game if neither files or debugrc work for you.
+Fixed Loenn being unusable if it can't write LoennIsOpen file
+
+0.4.0
+No longer track gliders if they are floating without having been picked up before
+Only write the file once every second
+Do not track holdabels outside of room bounds 
+Plugin now tries to use debugRC for data transfer instead of files.
+Plugin will now no longer track in game paths sometime after loenn is closed
+
+0.3.0
+[X] GravityHelper Support
+[X] Fix to number thing maybe idk
+[X] Fix CTRL+F5 in loenn making silhouettes permanent lol
+[X] Fix JustRespawned for Savestates
+Now saves settings :D
+Fix JustRespawned
