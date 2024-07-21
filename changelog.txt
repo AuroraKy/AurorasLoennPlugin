@@ -1,6 +1,7 @@
 
 0.9.0
-loenn 0.8 update
+loenn 0.8 update (thanks cruor)
+Added a button to temporarily clear the silhouettes from current room
 
 0.8.0
 Added Cache Decals option 

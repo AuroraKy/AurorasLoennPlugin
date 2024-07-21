@@ -463,6 +463,19 @@ local function checkbox(menu, lang, toggle, active)
   item[4] = active
 end
 
+
+local function button(menu, lang, func)
+    local item = $(menu):find(item -> item[1] == lang)
+    if not item then
+      item = {}
+      table.insert(menu, item)
+    end
+    item[1] = lang
+    item[2] = func
+  end
+
+  
+
 function device.editorDebugReloadEverything()
     print("[Aurora's Loenn Plugin] Reload Everything was called, this plugin is now broken. Please restart instead.")
     --device.batch:clear()
@@ -471,32 +484,26 @@ function device.editorDebugReloadEverything()
     --GET_FULL_DATA = true
 end
 
-function device.editorSceneChanged(name, ...)
-    if name == "Editor" then
-        local scene = sceneHandler.scenes[name]
-        --local item = $(scene.inputDevices):find(dev -> dev == device)
+-- Seems pointless
+-- function device.editorSceneChanged(name, ...)
+--     if name == "Editor" then
+--         local scene = sceneHandler.scenes[name]
+--         --local item = $(scene.inputDevices):find(dev -> dev == device)
 
-        if not scene._firstEnter then
-            --inputDevice.newInputDevice(scene.inputDevices, device)
-            
-            -- delete it or smth idk whats happening
-            local key = -1
-                for k,v in pairs(scene.inputDevices) do
-                    if v == device then
-                        key = k
-                    end
-                end
-            if key > 0 then
-                scene.inputDevices[key] = device
-            else
-                -- This is from newInputDevice, I need my device to be at around place 3 so I am just using it directly
-                -- This will probably break at some point.
-                -- starting from 0.8 should be 4 not 3 apparently
-                table.insert(scene.inputDevices, (#scene.inputDevices < 3 and #scene.inputDevices) or 3, device) 
-            end
-        end
-    end
-end
+--         for i, dev in pairs(scene.inputDevices) do
+--             if dev == device then
+--                 -- Update device
+--                 scene.inputDevices[i] = device
+
+--                 return
+--             end
+--         end
+
+--         -- This is from newInputDevice, I need my device to be at around place 4 so I am just using it directly
+--         -- This will probably break at some point.
+--         table.insert(scene.inputDevices, 4, device)
+--     end
+-- end
 
 local function injectCheckboxes()
     local menubar = require("ui.menubar").menubar
@@ -513,6 +520,7 @@ local function injectCheckboxes()
                     updateBatch(true)
                 end,
                 function() return settings.holdableSilhouetteEnabled end)
+    button(viewMenu, "aurora_aquir_AurorasLoennPlugin_clearSilhouettes", function() device.batch:clear() end)
 end
 
 injectCheckboxes()
@@ -523,22 +531,21 @@ if sceneHandler._aurorasloennplugin_unloadSeq then sceneHandler._aurorasloennplu
 
 local _sceneHandlerChangeScene = sceneHandler.changeScene
 function sceneHandler.changeScene(name, ...)
+    _sceneHandlerChangeScene(name, ...)
+
     if name == "Editor" then
         local scene = sceneHandler.scenes[name]
         local item = $(scene.inputDevices):find(dev -> dev == device)
 
-        if not scene._firstEnter and not item then
+        if not item then
             --inputDevice.newInputDevice(scene.inputDevices, device)
 
-            -- This is from newInputDevice, I need my device to be at around place 3 so I am just using it directly
+            -- This is from newInputDevice, I need my device to be at around place 4 so I am just using it directly
             -- This will probably break at some point.
-
-            -- starting from 0.8 should be 4 not 3 apparently
-            table.insert(scene.inputDevices, (#scene.inputDevices < 4 and #scene.inputDevices) or 4, device) 
+            table.insert(scene.inputDevices, 4, device)
         end
     end
 
-    _sceneHandlerChangeScene(name, ...)
 end
 
 function _aurorasloennplugin_unloadSeq()

@@ -4,3 +4,4 @@ ui.menubar.aurora_aquir_AurorasLoennPlugin_restrict_sidebar_size=Restrict Sideba
 ui.menubar.aurora_aquir_AurorasLoennPlugin_LoadDecalsOnce=Cache Decals [Aurora's Loenn Plugin]
 ui.menubar.aurora_aquir_AurorasLoennPlugin_LoadDecals=Clear Decal Cache [Aurora's Loenn Plugin]
 ui.menubar.aurora_aquir_AurorasLoennPlugin_LoadDecalsNotify=[Aurora's Loenn Plugin] Cleared Cache, decals will reload on next opening!
+ui.menubar.aurora_aquir_AurorasLoennPlugin_clearSilhouettes=Clear Silhouettes [Aurora's Loenn Plugin] 
