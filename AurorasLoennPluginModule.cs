@@ -12,6 +12,8 @@ using Color = Microsoft.Xna.Framework.Color;
 using System;
 using Image = Monocle.Image;
 using System.Collections.Specialized;
+using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 
 [assembly: IgnoresAccessChecksTo("Celeste")]
 namespace Celeste.Mod.AurorasLoennPlugin {
@@ -45,7 +47,6 @@ namespace Celeste.Mod.AurorasLoennPlugin {
 
         private Vector2 MadelineRespawnPosition = new Vector2();
         private bool MadelineRespawned = false; // this is JustRespawned but me doing it manually cause of savestates
-        private IDetour Hook_StateManager_LoadState;
 
         class StateComparer : IEqualityComparer<PlayerState>, IEqualityComparer<HoldableState>
         {
@@ -83,6 +84,7 @@ namespace Celeste.Mod.AurorasLoennPlugin {
             public readonly bool flipX;
             public readonly bool flipY;
             public readonly string roomName;
+            public readonly bool ducking;
 
             public PlayerState(Player player, float xOffset, float yOffset, string roomName)
             {
@@ -95,13 +97,14 @@ namespace Celeste.Mod.AurorasLoennPlugin {
                 this.color = hairColor;
                 this.flipX = player.Facing == Facings.Left;
                 this.flipY = (GravityHelperExports.GetPlayerGravity?.Invoke() ?? 0) != 0;
-                this.roomName = roomName;
+                this.roomName = Regex.Replace(roomName, "[^a-zA-Z0-9 ]", "_");
+                this.ducking = player.Ducking;
             }
 
             public override string ToString()
             {
                 string colorHex = color.R.ToString("X2") + color.G.ToString("X2") + color.B.ToString("X2");
-                return $"{id},{roomName},{x},{y},{colorHex},{flipX},{flipY}";
+                return $"{id},{roomName},{x},{y},{colorHex},{flipX},{flipY},{ducking}";
             }
 
         }
@@ -125,7 +128,7 @@ namespace Celeste.Mod.AurorasLoennPlugin {
                 this.x = holdable.Entity.Position.X - xOffset;
                 this.y = holdable.Entity.Position.Y - yOffset + this.handleVanillaYOffset(holdable);
                 this.sprite = sprite;
-                this.roomName = roomName;
+                this.roomName = Regex.Replace(roomName, "[^a-zA-Z0-9 ]", "_");
             }
 
             private int handleVanillaYOffset(Holdable holdable)
@@ -172,10 +175,21 @@ namespace Celeste.Mod.AurorasLoennPlugin {
             //(int)(actor?.GetGravity() ?? GravityType.Normal);
 
         }
+        [ModImportName("SpeedrunTool.SaveLoad")]
+        public static class SpeedrunToolImports {
+            public static Func<Action<Dictionary<Type, Dictionary<string, object>>, Level>, Action<Dictionary<Type, Dictionary<string, object>>, Level>, Action, Action<Level>, Action<Level>, Action, object> RegisterSaveLoadAction;
+            public static Action<object> Unregister;
+        }
+
+        private static object SavestateAction;
 
         public override void Load()
         {
             typeof(GravityHelperExports).ModInterop();
+            typeof(SpeedrunToolImports).ModInterop();
+
+            Console.WriteLine($"HIIIII {SpeedrunToolImports.RegisterSaveLoadAction != null}");
+            SavestateAction = SpeedrunToolImports.RegisterSaveLoadAction?.Invoke(null, OnLoadState, null, null, null, null);
 
             On.Celeste.Level.Update += ModLevelUpdate;
             Everest.Events.Player.OnDie += OnPlayerDeath;
@@ -225,6 +239,19 @@ namespace Celeste.Mod.AurorasLoennPlugin {
                 }
             });
 
+            RCEndPoints.Add(new RCEndPoint {
+                Path = "/aurora_aquir/ClearPaths",
+                Name = "Clears all paths",
+                InfoHTML = "This is used by Aurora's Lönn Plugin to clear all paths when Clear Paths is pressed.",
+                Handle = delegate (HttpListenerContext c) {
+                    lastDebugRCTime = DateTime.Now;
+
+                    ClearPaths();
+
+                    Everest.DebugRC.Write(c, "OK");
+                }
+            });
+
             RCEndPoints.Add(new RCEndPoint
             {
                 Path = "/aurora_aquir/LoennIsOpen",
@@ -246,27 +273,8 @@ namespace Celeste.Mod.AurorasLoennPlugin {
 
             Settings.DoNotCheckForLoenn = false;
 
-            // Taken from Head2head thanks
-            try
-            {
-                // Get type info and functions
-                Type StateManager = Type.GetType("Celeste.Mod.SpeedrunTool.SaveLoad.StateManager,SpeedrunTool");
-                if (StateManager != null)
-                {
-                    MethodInfo StateManager_LoadState = StateManager.GetMethod(
-                        "LoadState", BindingFlags.NonPublic | BindingFlags.Instance,
-                        Type.DefaultBinder, new Type[] { typeof(bool) }, null);
-
-                    // Set up hooks
-                    Hook_StateManager_LoadState = new Hook(StateManager_LoadState,
-                        typeof(AurorasLoennPluginModule).GetMethod("OnLoadState", BindingFlags.NonPublic | BindingFlags.Static));
-                }
-            }
-            catch (Exception e)
-            {
-                Logger.LogDetailed(e);
-            }
         }
+
 
         [Command("aurorasloennplugin_debug", "Information about aurora's loenn plugin meant for debug")]
         public static void DebugInfo()
@@ -284,9 +292,7 @@ namespace Celeste.Mod.AurorasLoennPlugin {
             On.Celeste.Level.Update -= ModLevelUpdate;
             Everest.Events.Player.OnDie -= OnPlayerDeath;
 
-            Hook_StateManager_LoadState?.Dispose();
-            Hook_StateManager_LoadState = null;
-
+            SpeedrunToolImports.Unregister?.Invoke(SavestateAction);
 
             foreach (RCEndPoint rcEndPoint in RCEndPoints)
             {
@@ -338,20 +344,15 @@ namespace Celeste.Mod.AurorasLoennPlugin {
             MadelineRespawned = true;
         }
 
-        private static bool OnLoadState(Func<object, bool, bool> orig, object stateManager, bool tas)
+
+        private static void OnLoadState(Dictionary<Type, Dictionary<string, object>> dictionary, Level level)
         {
-            bool result = orig(stateManager, tas);
-            Player player = (Engine.Scene as Level).Tracker?.GetEntity<Player>();
-            if(player != null)
-            {
-                Instance.MadelineRespawned = true;
-                Instance.MadelineRespawnPosition = player.Position;
-            }
-            return result;
+                Instance.ClearPaths();
         }
 
         private void ClearPaths()
         {
+            MadelineRespawnPosition = Vector2.Zero;
             PlayerStates.Clear();
             HoldableStates.Clear();
 
@@ -436,14 +437,13 @@ namespace Celeste.Mod.AurorasLoennPlugin {
 
             if (player != null && level != null && level.Session != null)
             {
-                if (player.JustRespawned) MadelineRespawnPosition = player.Position; // if just respawned works use it lol
+                if (player.JustRespawned) MadelineRespawnPosition = player.Position; // if just respawned works use it lol 
                 if (MadelineRespawned && player.Position == MadelineRespawnPosition)
                 {
                     playerDied = true;
                     return;
                 }
-                if (playerDied)
-                {
+                if (playerDied) {
                     playerDied = false;
                     MadelineRespawned = false;
                     ClearPaths();

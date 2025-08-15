@@ -1,7 +1,7 @@
-local supportedLoennVersion = require("utils.version_parser")("0.9")
+local supportedUntilLoennVersion = require("utils.version_parser")("1.1")
 local currentLoennVersion = require("meta").version
 
-if supportedLoennVersion <= currentLoennVersion then
+if supportedUntilLoennVersion <= currentLoennVersion then
     return nil
 end
 
@@ -55,7 +55,7 @@ if not listWidgets.hooked_by_aurora_lmao then
     function listWidgets.updateItems(list, items, target, fromFilter, preventCallback, callbackRequiresChange)
         if SidebarSize.restrictSidebarSize then
             for _, item in ipairs(items) do
-                if string.len(item.text) > settings.maxCharsSidebar then
+                if type(item.text) == "string" and string.len(item.text) > settings.maxCharsSidebar then
                     if not item.tooltipText then item.tooltipText = item.text end
                     item.text = string.sub(item.text, 1, settings.maxCharsSidebar) .. "..."
                 end

@@ -1,10 +1,10 @@
-local maxTestedLoennVersion = require("utils.version_parser")("0.7.10")
-local maxReasonableLoennVersion = require("utils.version_parser")("0.9")
+local maxTestedLoennVersion = require("utils.version_parser")("1.0")
+local tooHighLoennVersion = require("utils.version_parser")("1.1")
 local currentLoennVersion = require("meta").version
 local logging = require("logging")
 
-if currentLoennVersion >= maxReasonableLoennVersion then
-    logging.error("Auroras's Loenn Plugin/decal_loading.lua NOT loaded, version is not under 0.8")
+if currentLoennVersion >= tooHighLoennVersion then
+    logging.error("Auroras's Loenn Plugin/decal_loading.lua NOT loaded, version is not 1.0 or under")
     return nil
 elseif currentLoennVersion > maxTestedLoennVersion then
     logging.info("Auroras's Loenn Plugin/decal_loading.lua was loaded but this version has not been tested. (>0.7.10)")
@@ -51,7 +51,6 @@ if not decals.hooked_by_aurora_AurorasLoennPlugin_Cachedecal then
             return orig_decals_getPlacements(layer, specificMods)
         end
 
-        logging.warning("hi")
         if layer == "decalsFg" then
 
           if library.ReloadDecalsOnce.fg or not fg_cache then

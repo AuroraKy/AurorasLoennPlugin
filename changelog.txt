@@ -1,3 +1,41 @@
+[] Tab to change selected field in thing?
+https://bsky.app/profile/monika523.bsky.social/post/3lm3l2r37rk2c
+
+0.12.4 
+fix speedruntools integration, loading state now clears path again.
+add a stupid button to move rendering along the array until it is below ui
+
+0.12.3
+Fix a bug where sidebard_size crashes stylegrounds on loenn 1.0.x
+Add FrostHelper/IceSpinners to shown hitboxes
+
+0.12.2
+Loenn version 1.0 bump
+
+0.12.1
+Change clear silhouette hotkey to shift+c by default
+If clear silhouette hotkey is v change to shift+c for now (i should remove this in the future)
+
+0.12.0
+add a button to clear hitboxes (now actually c lears hitboxes wow)
+added spike/spinner hitboxes?
+fixed player hitbox being 1 too high apparently
+Cursed Room names no longer crash the mod
+
+0.11.1
+this version fixed holdable sprites cause i broke them in 0.10.0
+
+0.10.0
+
+Playerstate now also tracks ducking
+Added player crouch visuals
+Add option to show hitboxes
+
+0.9.2
+Changed thread requiring mechanism as it is broken in current loenn
+
+0.9.1
+loenn 0.9 version bump
 
 0.9.0
 loenn 0.8 update (thanks cruor)

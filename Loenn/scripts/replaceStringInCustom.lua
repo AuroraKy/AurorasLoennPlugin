@@ -18,12 +18,17 @@ local script = {
     fieldOrder = {"name", "attr", "from", "to", "entities", "triggers"}
 }
 
-function dump(o)
+function dump(o, i)
+    i = i or 999
+    if(i == 0) then
+    
+        return "<<DEPTH LIMIT REACHED>>"
+    end
     if type(o) == 'table' then
        local s = '{ '
        for k,v in pairs(o) do
           if type(k) ~= 'number' then k = '"'..k..'"' end
-          s = s .. '['..k..'] = ' .. dump(v) .. ','
+          s = s .. '['..k..'] = ' .. dump(v, i-1) .. ','
        end
        return s .. '} '
     else

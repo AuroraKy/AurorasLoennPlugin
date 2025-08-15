@@ -1,4 +1,4 @@
-local supportedUntilLoennVersion = require("utils.version_parser")("0.9")
+local supportedUntilLoennVersion = require("utils.version_parser")("1.1")
 local currentLoennVersion = require("meta").version
 
 if supportedUntilLoennVersion <= currentLoennVersion then
@@ -16,20 +16,43 @@ local loadedState = require("loaded_state")
 local fileLocations = require("file_locations")
 
 local drawableSprite = require("structs.drawable_sprite")
+local drawableRectangle = require("structs.drawable_rectangle")
 local smartDrawingBatch = require("structs.smart_drawing_batch")
 local utils = require("utils")
 local threadHandler = require("utils.threads")
 local viewportHandler = require("viewport_handler")
 
+local hotkeyHandler = require("hotkey_handler")
 
 local sceneHandler = require("scene_handler")
 local inputDevice = require("input_device")
 
+local celesteRender = require("celeste_render")
+
 if settings.playerSilhouetteEnabled == nil then
     settings.playerSilhouetteEnabled = false
 end
+if settings.playerHitboxSilhouetteEnabled == nil then
+    settings.playerHitboxSilhouetteEnabled = false
+end
 if settings.holdableSilhouetteEnabled == nil then
     settings.holdableSilhouetteEnabled = false
+end
+
+if settings.hotkeys == nil then
+    settings.hotkeys = {
+        toggle_player_silhouettes = "c",
+        toggle_hitbox_silhouettes = "x",
+        toggle_holdable_silhouettes = "z",
+    }
+end
+
+if settings.hotkeys.clear_silhouettes == nil or settings.hotkeys.clear_silhouettes == "v" then
+    settings.hotkeys.clear_silhouettes = "shift + c"
+end
+
+if settings.only_capture_if_visible == nil then
+    settings.only_capture_if_visible = false
 end
 
 local device = {
@@ -39,13 +62,19 @@ local device = {
     PLAYER_DATA_PATH = "ModFiles/aurora_aquir_AurorasLoennPlugin/PlayerStatePath.txt",
     HOLDABLE_DATA_PATH = "ModFiles/aurora_aquir_AurorasLoennPlugin/HoldableStatePath.txt",
     PLAYER_TEXTURE = "characters/aurora_aquir_loenn_plugin_silhouette/madeline",
+    PLAYER_CROUCH_TEXTURE = "characters/aurora_aquir_loenn_plugin_silhouette/madeline_crouch",
+    PLAYER_HITBOX_TEXTURE = "characters/aurora_aquir_loenn_plugin_silhouette/madeline_hitbox",
+    PLAYER_CROUCH_HITBOX_TEXTURE = "characters/aurora_aquir_loenn_plugin_silhouette/madeline_crouch_hitbox",
+    SPINNER_HITBOX_TEXTURE = "characters/aurora_aquir_loenn_plugin_silhouette/spinner_hitbox",
     OPACITY = 0.33,
+    HITBOX_OPACITY = 0.66,
     UPDATE_RATE = 1,
     playerSilhouettes = {},
     holdableSilhouettes = {}
 }
 
 device.batch = smartDrawingBatch.createOrderedBatch()
+device.HitboxesBatch = smartDrawingBatch.createOrderedBatch()
 
 local LOENN_IS_OPEN_PATH = "ModFiles/aurora_aquir_AurorasLoennPlugin/loennOpen"
 local DEBUGRC_FAILED = false
@@ -72,6 +101,7 @@ local function notifyLoennIsOpen()
     already_checking_loenn_open = true
     -- try debugrc
     local code = [[
+        --require("lua_setup")
         require("selene").load()
         require("selene/selene/wrappers/searcher/love2d/searcher").load()
         require("love.system")
@@ -123,6 +153,7 @@ local function getDataDebugRC(full, callbackPlayer, callbackHoldables)
     if get_data_debug_rc_blocker > 0 then return end
     get_data_debug_rc_blocker = 2
     local code = [[
+    -- require("lua_setup")
         require("selene").load()
         require("selene/selene/wrappers/searcher/love2d/searcher").load()
         require("love.system")
@@ -179,8 +210,9 @@ local function getData(path)
     return data:split("\n")()
 end
 
-local function getSprite(x, y, flipX, flipY, colorHex, texture)
-    local color = {1, 1, 1, device.OPACITY}
+local function getSprite(x, y, flipX, flipY, colorHex, texture, opacity, justificationX, justificationY)
+
+    local color = {1, 1, 1, opacity or device.OPACITY}
     local success, r, g, b = utils.parseHexColor(colorHex or "ffffff")
     if success then
         color[1] = r
@@ -195,7 +227,7 @@ local function getSprite(x, y, flipX, flipY, colorHex, texture)
         y = y,
         color = color,
         depth = 0,
-        justificationX = 0.5, justificationY = 0.5, -- needed for flipping to work correctly
+        justificationX = justificationX or 0.5, justificationY = justificationY or 0.5, -- needed for flipping to work correctly
     })
     if not sprite then return nil end
 
@@ -207,23 +239,32 @@ end
 
 
 local playerSilhouetteID = -1
+local playerHitboxSilhouetteID = -1
 local holdableSilhouetteID = -1
 local function getSilhouettes(allSillhouettes, selectedRoom)
 
     -- sort by room 
-    local selectedRoomName = selectedRoom.name
+    local selectedRoomName = string.gsub(selectedRoom.name or "",  "[^%w ]", "_")
     local selectedRoomSilhouettes = {}
 
     if allSillhouettes then
          playerSilhouetteID = -1
+         playerHitboxSilhouetteID = -1
          holdableSilhouetteID = -1
     end
-
-    if settings.playerSilhouetteEnabled then
+    
+    if settings.playerSilhouetteEnabled or settings.playerHitboxSilhouetteEnabled then
         for _, silhouette in ipairs(device.playerSilhouettes) do
-            if silhouette.id > playerSilhouetteID and (silhouette.roomName and (silhouette.roomName == selectedRoomName or "lvl_" .. silhouette.roomName == selectedRoomName)) then 
+            if ((not silhouette.isHitbox and silhouette.id > playerSilhouetteID) or (silhouette.isHitbox and silhouette.id > playerHitboxSilhouetteID))
+                and (silhouette.roomName and (silhouette.roomName == selectedRoomName or "lvl_" .. silhouette.roomName == selectedRoomName))
+                and ((settings.playerSilhouetteEnabled and not silhouette.isHitbox) or (settings.playerHitboxSilhouetteEnabled and silhouette.isHitbox)) then 
                 table.insert(selectedRoomSilhouettes, silhouette.sprite)
-                playerSilhouetteID = silhouette.id 
+                
+                if not silhouette.isHitbox then 
+                    playerSilhouetteID = silhouette.id 
+                else 
+                    playerHitboxSilhouetteID = silhouette.id 
+                end
             end
         end
     end
@@ -265,7 +306,7 @@ local function updateSilhouettes(redrawBatch, data, player)
     if not data or not data[1] then return end 
     
 
-    if player and settings.playerSilhouetteEnabled then
+    if player and (not settings.only_capture_if_visible or (settings.playerSilhouetteEnabled or settings.playerHitboxSilhouetteEnabled)) then
 
         local line_one = data[1]:split(",")
         local line_amount = tonumber(line_one[1])
@@ -294,20 +335,36 @@ local function updateSilhouettes(redrawBatch, data, player)
                     local colorHex = line[5]
                     local flipX = line[6]=="True"
                     local flipY = line[7]=="True"
-                    local texture = device.PLAYER_TEXTURE
-
+                    local ducking = line[8]=="True"
+                    --print("[Aurora's Loenn Plugin/SilhouetteDraw] line8 " .. line[8])
+                    --print("[Aurora's Loenn Plugin/SilhouetteDraw] texture path " .. (ducking and device.PLAYER_CROUCH_TEXTURE or device.PLAYER_TEXTURE))
+                    
                     playerHighestID = id
 
-                    local sprite = getSprite(x, y, flipX, flipY, colorHex, texture)
+                    if not settings.only_capture_if_visible or settings.playerSilhouetteEnabled then 
+                        local texture = ducking and device.PLAYER_CROUCH_TEXTURE or device.PLAYER_TEXTURE 
 
-                    if sprite then
-                        table.insert(device.playerSilhouettes, {id = id, roomName = roomName, sprite = sprite})
+                        local sprite = getSprite(x, y, flipX, flipY, colorHex, texture, device.OPACITY)
+
+                        if sprite then
+                            table.insert(device.playerSilhouettes, {id = id, roomName = roomName, sprite = sprite, isHitbox = false})
+                        end
+                    end
+                    if not settings.only_capture_if_visible or settings.playerHitboxSilhouetteEnabled then
+                    
+                        local texture = ducking and device.PLAYER_CROUCH_HITBOX_TEXTURE or device.PLAYER_HITBOX_TEXTURE
+                        
+                        local sprite = getSprite(x, y, flipX, flipY, "FFFFFF", texture, device.HITBOX_OPACITY)
+
+                        if sprite then
+                            table.insert(device.playerSilhouettes, {id = id, roomName = roomName, sprite = sprite, isHitbox = true})
+                        end
                     end
                 end
             end
         end
-
-    elseif not player and settings.holdableSilhouetteEnabled then
+    
+    elseif not player and (not settings.only_capture_if_visible or settings.holdableSilhouetteEnabled) then
 
         local line_one = data[1]:split(",")
         local line_amount = tonumber(line_one[1])
@@ -328,6 +385,7 @@ local function updateSilhouettes(redrawBatch, data, player)
                 local line = data[i]:split(",")
 
                 local id = tonumber(line[1])
+
                 if id > holdableHighestID then 
                     local roomName = line[2]
                     local x = tonumber(line[3])
@@ -339,7 +397,7 @@ local function updateSilhouettes(redrawBatch, data, player)
                     
                     holdableHighestID = id
                     
-                    local sprite = getSprite(x, y, flipX, flipY, colorHex, texture)
+                    local sprite = getSprite(x, y, flipX, flipY, colorHex, texture, device.OPACITY)
 
                     if sprite then
                         table.insert(device.holdableSilhouettes, {id = id, roomName = roomName, sprite = sprite})
@@ -400,8 +458,67 @@ function device.draw()
     viewportHandler.drawRelativeTo(x, y, function()
         --love.graphics.draw(canvas)
         device.batch:draw()
+        if settings.playerHitboxSilhouetteEnabled then
+            device.HitboxesBatch:draw()
+        end
     end)
 end
+
+-- #region hitboxes for spinners/spikes
+
+local function createHitboxBatch()
+
+    local selectedRoom = loadedState.getSelectedRoom()
+    if not not selectedRoom then
+        device.HitboxesBatch:clear()
+        for i, entity in ipairs(selectedRoom.entities) do 
+            local name = entity._name
+            local sprite = nil
+
+            if name == "spinner" or name == "FrostHelper/IceSpinner" then 
+                sprite = getSprite(entity.x, entity.y, false, false, "FFFFFF", device.SPINNER_HITBOX_TEXTURE, 1, 0.5, 0)
+            elseif name:match"[Ss]pikes?" ~= nil then
+                -- we are spike 
+
+                local x = entity.x
+                local y = entity.y 
+                local width = entity.width or 3
+                local height = entity.height or 3
+                
+                -- what direction?
+                if name:match"Right" ~= nil then
+                    x = x
+                elseif name:match"Left" ~= nil then
+                    x = x - 3
+                elseif name:match"Up" ~= nil then
+                    y = y - 3
+                elseif name:match"Down" ~= nil then
+                    y = y
+                end
+                sprite = drawableRectangle.fromRectangle("line", x, y, width, height, "ff0000")
+            end
+            
+            if sprite ~= nil then 
+                device.HitboxesBatch:addFromDrawable(sprite)
+            end
+
+        end
+    end
+
+end
+
+local orig_invalidateRoomCache = celesteRender.invalidateRoomCache
+
+function celesteRender.invalidateRoomCache(roomName, key)
+    if key == "entities" then 
+        createHitboxBatch()
+    end
+    return orig_invalidateRoomCache(roomName, key)
+end
+
+-- #endregion hitboxes for spinners/spikes
+
+
 
 local lastRoomName = nil
 local loennIsOpenCounter = 0 -- checks for debugrc every 3 seconds
@@ -428,10 +545,12 @@ function device.update(dt)
         timeCount = timeCount - device.UPDATE_RATE
     else
         timeCount = 0
+        createHitboxBatch()
         updateBatch(true)
     end
 
     lastRoomName = selectedRoom.name
+
     
     if not pcall(updateData, roomSwitched) then
         print("[Aurora's Loenn Plugin/SilhouetteDraw] Updating Silhouette data failed.")
@@ -505,6 +624,61 @@ end
 --     end
 -- end
 
+-- but like actually remove them
+local function clearSilhouettes()
+    device.batch:clear()
+
+
+    -- clear with debugrc hopefully
+    local code = [[
+        --require("lua_setup")
+        require("selene").load()
+        require("selene/selene/wrappers/searcher/love2d/searcher").load()
+        require("love.system")
+
+        local args = {...}
+        local channelName = unpack(args)
+        local channel = love.thread.getChannel(channelName)
+        local utils = require("utils")
+        local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
+        
+        local debugrcWorked = false
+        if hasRequest then 
+            local response = request.send("http://localhost:32270/aurora_aquir/ClearPaths", {timeout = 1}) 
+            if response then
+                local code = response.code
+
+                if code == 200 then
+                    debugrcWorked = true
+                end
+            end
+        end
+        
+        channel:push({debugrcWorked})
+    ]]
+    
+    return threadHandler.createStartWithCallback(code, function(event)
+        already_checking_loenn_open = false
+        if not event[1] then
+            -- clearing via debugRC failed we should clear the files instead
+            local function clearData(path)
+                local path = utils.joinpath(fileLocations.getCelesteDir(), path);
+                local f, err = io.open(path, "w")
+                if not f then return end
+                f:write("")
+                f:close()
+            end
+            clearData(device.PLAYER_DATA_PATH)
+            clearData(device.HOLDABLE_DATA_PATH)
+        else 
+            DEBUGRC_FAILED = false
+        end
+    end)
+
+
+end
+
+local MoveDevice = {}
 local function injectCheckboxes()
     local menubar = require("ui.menubar").menubar
     local viewMenu = $(menubar):find(menu -> menu[1] == "view")[2]
@@ -514,20 +688,51 @@ local function injectCheckboxes()
                     updateBatch(true)
                 end,
                 function() return settings.playerSilhouetteEnabled end)
+    checkbox(viewMenu, "aurora_aquir_AurorasLoennPlugin_show_playerHitboxSilhouette",
+                function()
+                    settings.playerHitboxSilhouetteEnabled = not settings.playerHitboxSilhouetteEnabled
+                    updateBatch(true)
+                end,
+                function() return settings.playerHitboxSilhouetteEnabled end)
     checkbox(viewMenu, "aurora_aquir_AurorasLoennPlugin_show_holdableSilhouette",
                 function()
                     settings.holdableSilhouetteEnabled = not settings.holdableSilhouetteEnabled
                     updateBatch(true)
                 end,
                 function() return settings.holdableSilhouetteEnabled end)
-    button(viewMenu, "aurora_aquir_AurorasLoennPlugin_clearSilhouettes", function() device.batch:clear() end)
+                
+                
+    button(viewMenu, "aurora_aquir_AurorasLoennPlugin_clearSilhouettes", clearSilhouettes)
+                
+    button(viewMenu, "aurora_aquir_AurorasLoennPlugin_moveDeviceForward", function() MoveDevice[1]() end)
+    -- button(viewMenu, "aurora_aquir_AurorasLoennPlugin_moveDeviceBackward", function() MoveDevice[2]() end)
 end
 
 injectCheckboxes()
 
+-- hotkeys
+
+local function toggleSilhouettes(nr)
+    if nr == 1 then 
+        settings.holdableSilhouetteEnabled = not settings.holdableSilhouetteEnabled
+    elseif nr == 2 then
+        settings.playerHitboxSilhouetteEnabled = not settings.playerHitboxSilhouetteEnabled
+    elseif nr == 3 then
+        settings.playerSilhouetteEnabled = not settings.playerSilhouetteEnabled
+    end
+    updateBatch(true)
+end
+
+
+hotkeyHandler.addHotkey("global", settings.hotkeys.toggle_holdable_silhouettes, function () toggleSilhouettes(1) end)
+hotkeyHandler.addHotkey("global", settings.hotkeys.toggle_hitbox_silhouettes,  function () toggleSilhouettes(2) end)
+hotkeyHandler.addHotkey("global", settings.hotkeys.toggle_player_silhouettes,  function () toggleSilhouettes(3) end)
+hotkeyHandler.addHotkey("global", settings.hotkeys.clear_silhouettes,  clearSilhouettes)
+
 
 -- Curtesy of Cruor of how to add a device (so I get draw/update functions)
 if sceneHandler._aurorasloennplugin_unloadSeq then sceneHandler._aurorasloennplugin_unloadSeq() end
+
 
 local _sceneHandlerChangeScene = sceneHandler.changeScene
 function sceneHandler.changeScene(name, ...)
@@ -538,14 +743,46 @@ function sceneHandler.changeScene(name, ...)
         local item = $(scene.inputDevices):find(dev -> dev == device)
 
         if not item then
-            --inputDevice.newInputDevice(scene.inputDevices, device)
-
-            -- This is from newInputDevice, I need my device to be at around place 4 so I am just using it directly
-            -- This will probably break at some point.
+            -- This is from newInputDevice, I need my device to be at around place 4..
             table.insert(scene.inputDevices, 4, device)
+
+            table.insert(MoveDevice, function()
+                moveElement(scene.inputDevices, device, 1)
+            end)
+            -- table.insert(MoveDevice, function()
+            --     moveElement(scene.inputDevices, device, -1)
+            -- end)
         end
     end
 
+
+end
+
+
+function moveElement(tbl, element, dir)
+    local currentIndex = nil
+
+    -- 1. Find the current index of the element
+    for i, v in ipairs(tbl) do
+        if v == element then
+            currentIndex = i
+            break
+        end
+    end
+
+    -- 2. If the element is found and is not already at the very first position
+    if currentIndex and currentIndex > 1 then
+        -- 3. Remove the element from its current position
+        local removedElement = table.remove(tbl, currentIndex)
+
+        -- 4. Insert it one position earlier
+        table.insert(tbl, currentIndex + dir, removedElement)
+        print("[Aurora's Loenn Plugin] moved inputdevice from " .. currentIndex .. " to " .. (currentIndex + dir))
+        return true -- Indicate success
+    end
+
+    print("[Aurora's Loenn Plugin] failed to move inputdevice.")
+    return false -- Element not found or already at the beginning
 end
 
 function _aurorasloennplugin_unloadSeq()
