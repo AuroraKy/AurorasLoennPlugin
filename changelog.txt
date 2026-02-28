@@ -1,6 +1,12 @@
 [] Tab to change selected field in thing?
 https://bsky.app/profile/monika523.bsky.social/post/3lm3l2r37rk2c
 
+0.13.0
+Rework how paths are obtained from debugrc, this should help memory issues.
+
+0.12.5
+Add option to make states not reset path
+
 0.12.4 
 fix speedruntools integration, loading state now clears path again.
 add a stupid button to move rendering along the array until it is below ui

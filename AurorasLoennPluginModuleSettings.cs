@@ -4,6 +4,7 @@ namespace Celeste.Mod.AurorasLoennPlugin {
         public bool Enabled { get; set; } = true;
         [SettingSubText("aurorasloennplugin_modsettings_loennoverride")]
         public bool DoNotCheckForLoenn { get; set; } = false;
+        public bool ResetPathOnState { get; set; } = true;
         [SettingRange(1, 20)]
         public int PlayerSamplingRate { get; set; } = 5;
         [SettingRange(1, 20)]

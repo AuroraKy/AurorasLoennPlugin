@@ -188,7 +188,6 @@ namespace Celeste.Mod.AurorasLoennPlugin {
             typeof(GravityHelperExports).ModInterop();
             typeof(SpeedrunToolImports).ModInterop();
 
-            Console.WriteLine($"HIIIII {SpeedrunToolImports.RegisterSaveLoadAction != null}");
             SavestateAction = SpeedrunToolImports.RegisterSaveLoadAction?.Invoke(null, OnLoadState, null, null, null, null);
 
             On.Celeste.Level.Update += ModLevelUpdate;
@@ -347,7 +346,9 @@ namespace Celeste.Mod.AurorasLoennPlugin {
 
         private static void OnLoadState(Dictionary<Type, Dictionary<string, object>> dictionary, Level level)
         {
+            if(Settings.ResetPathOnState) {
                 Instance.ClearPaths();
+            }
         }
 
         private void ClearPaths()

@@ -55,6 +55,82 @@ if settings.only_capture_if_visible == nil then
     settings.only_capture_if_visible = false
 end
 
+
+-- region Worker for handling HTTP requests
+local worker = (function()
+    local worker_thread_code = [[
+        require("selene").load()
+        require("selene/selene/wrappers/searcher/love2d/searcher").load()
+        require("love.system")
+        require("love.thread")
+
+        local utils = require("utils")
+        -- local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
+        local http = require("socket.http")
+        http.TIMEOUT = 1
+
+
+        local request_channel = love.thread.getChannel("aurora_aquir_requests")
+        local result_channel = love.thread.getChannel("aurora_aquir_results")
+
+        -- print("[Aurora's Loenn Plugin] Worker active")
+        while true do
+            local task = request_channel:demand()
+            if not task then break end
+            -- print("[Aurora's Loenn Plugin] Job received")
+
+            local response_data = nil
+            -- if hasRequest then
+            --     local response = request.send(task.url, {timeout = task.timeout or 5})
+            --     -- print("[Aurora's Loenn Plugin] Response received " .. response.code)
+            --     if response and response.code == 200 then
+            --         response_data = response.body
+            --     end
+            -- end
+                        
+
+            local body, code = http.request(task.url)
+            if code == 200 then
+                response_data = body
+            end
+
+            -- print("[Aurora's Loenn Plugin] Done with data " .. response_data)
+            result_channel:push({id = task.id, data = response_data})
+
+        end
+    ]]
+
+    local thread = love.thread.newThread(worker_thread_code)
+    thread:start()
+
+    local request_channel = love.thread.getChannel("aurora_aquir_requests")
+    local result_channel = love.thread.getChannel("aurora_aquir_results")
+    local next_task_id = 1
+    local pending_callbacks = {}
+    return {
+        addTask = function(url, callback, timeout)
+            if #pending_callbacks > 4 then
+                print("[AurorasLoennPlugin] TOO MANY CALLBACKS!!!! WHAT??? " .. #pending_callbacks)
+            end
+            local task_id = next_task_id
+            pending_callbacks[task_id] = callback
+            request_channel:push({id = task_id, url = url, timeout = timeout})
+            next_task_id = next_task_id + 1
+        end,
+        update = function()
+            local result = result_channel:pop()
+            while result do
+                if pending_callbacks[result.id] then
+                    pending_callbacks[result.id](result.data)
+                    pending_callbacks[result.id] = nil
+                end
+                result = result_channel:pop()
+            end
+        end
+    }
+end)()
+-- endregion
+
 local device = {
     _type = "device",
     name = "AuroraSilhouetteDrawDevice",
@@ -97,46 +173,59 @@ end
 local already_checking_loenn_open = false
 local function notifyLoennIsOpen()
     if already_checking_loenn_open then return end
-
     already_checking_loenn_open = true
-    -- try debugrc
-    local code = [[
-        --require("lua_setup")
-        require("selene").load()
-        require("selene/selene/wrappers/searcher/love2d/searcher").load()
-        require("love.system")
 
-        local args = {...}
-        local channelName = unpack(args)
-        local channel = love.thread.getChannel(channelName)
-        local utils = require("utils")
-        local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
-        
-        local debugrcWorked = false
-        if hasRequest then 
-            local response = request.send("http://localhost:32270/aurora_aquir/LoennIsOpen", {timeout = 1}) 
-            if response then
-                local code = response.code
-
-                if code == 200 then
-                    debugrcWorked = true
-                end
-            end
-        end
-        
-        channel:push({debugrcWorked})
-    ]]
-    
-    return threadHandler.createStartWithCallback(code, function(event)
+    worker.addTask("http://localhost:32270/aurora_aquir/LoennIsOpen", function(response_body)
         already_checking_loenn_open = false
-        if not event[1] then
-            -- create file instead and remember debugrc failed :D
+        if response_body then
+            DEBUGRC_FAILED = false
+        else
             DEBUGRC_FAILED = true
             pcall(createLoennIsOpenFile)
-        else 
-            DEBUGRC_FAILED = false
         end
-    end)
+    end, 1)
+    -- 1 second timeout for this check
+    -- if already_checking_loenn_open then return end
+
+    -- already_checking_loenn_open = true
+    -- -- try debugrc
+    -- local code = [[
+    --     --require("lua_setup")
+    --     require("selene").load()
+    --     require("selene/selene/wrappers/searcher/love2d/searcher").load()
+    --     require("love.system")
+
+    --     local args = {...}
+    --     local channelName = unpack(args)
+    --     local channel = love.thread.getChannel(channelName)
+    --     local utils = require("utils")
+    --     local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
+        
+    --     local debugrcWorked = false
+    --     if hasRequest then 
+    --         local response = request.send("http://localhost:32270/aurora_aquir/LoennIsOpen", {timeout = 1}) 
+    --         if response then
+    --             local code = response.code
+
+    --             if code == 200 then
+    --                 debugrcWorked = true
+    --             end
+    --         end
+    --     end
+        
+    --     channel:push({debugrcWorked})
+    -- ]]
+    
+    -- return threadHandler.createStartWithCallback(code, function(event)
+    --     already_checking_loenn_open = false
+    --     if not event[1] then
+    --         -- create file instead and remember debugrc failed :D
+    --         DEBUGRC_FAILED = true
+    --         pcall(createLoennIsOpenFile)
+    --     else 
+    --         DEBUGRC_FAILED = false
+    --     end
+    -- end)
 end
 
 --[[
@@ -148,53 +237,79 @@ end
     woo debugrc now?
 ]]
 
-local get_data_debug_rc_blocker = 0
+-- function dump(o)
+--     if type(o) == 'table' then
+--        local s = '{ '
+--        for k,v in pairs(o) do
+--           if type(k) ~= 'number' then k = '"'..k..'"' end
+--           s = s .. '['..k..'] = ' .. dump(v) .. ','
+--        end
+--        return s .. '} '
+--     else
+--        return tostring(o)
+--     end
+--  end
+local get_data_debug_rc_blocker = false
 local function getDataDebugRC(full, callbackPlayer, callbackHoldables)
-    if get_data_debug_rc_blocker > 0 then return end
-    get_data_debug_rc_blocker = 2
-    local code = [[
-    -- require("lua_setup")
-        require("selene").load()
-        require("selene/selene/wrappers/searcher/love2d/searcher").load()
-        require("love.system")
+    if get_data_debug_rc_blocker then return end
+    get_data_debug_rc_blocker = true
 
-        local args = {...}
-        local channelName, path  = unpack(args)
-        local channel = love.thread.getChannel(channelName)
-        local utils = require("utils")
-        local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
+    -- print("[Auroras Loenn Plugin/getDataDebugRC] Getting data... full? " .. tostring(full))
+
+    local partial_str = (full and 'false' or 'true')
+    worker.addTask("http://localhost:32270/aurora_aquir/PlayerStatePath?partial=" .. partial_str, function(response_body)
+        callbackPlayer(response_body)
+    end)
+    worker.addTask("http://localhost:32270/aurora_aquir/HoldableStatePath?partial=" .. partial_str, function(response_body)
+        callbackHoldables(response_body)
+        get_data_debug_rc_blocker = false -- Allow new requests after the last one completes
+    end)
+    
+    -- if get_data_debug_rc_blocker > 0 then return end
+    -- get_data_debug_rc_blocker = 2
+    -- local code = [[
+    -- -- require("lua_setup")
+    --     require("selene").load()
+    --     require("selene/selene/wrappers/searcher/love2d/searcher").load()
+    --     require("love.system")
+
+    --     local args = {...}
+    --     local channelName, path  = unpack(args)
+    --     local channel = love.thread.getChannel(channelName)
+    --     local utils = require("utils")
+    --     local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
         
-        local data = nil
-        if hasRequest then 
-            local response = request.send(path)
-            if response then
-                local code = response.code
+    --     local data = nil
+    --     if hasRequest then 
+    --         local response = request.send(path)
+    --         if response then
+    --             local code = response.code
 
-                if code == 200 then
-                    data = response.body
-                end
-            end
-        end
+    --             if code == 200 then
+    --                 data = response.body
+    --             end
+    --         end
+    --     end
 
-        channel:push({data})
-    ]]
+    --     channel:push({data})
+    -- ]]
 
-    local reduceBlocker = function(callback)
+    -- local reduceBlocker = function(callback)
         
-        return function(...)
-            get_data_debug_rc_blocker -= 1
-            callback(...)
-        end
+    --     return function(...)
+    --         get_data_debug_rc_blocker -= 1
+    --         callback(...)
+    --     end
 
-    end
+    -- end
 
-    if full then 
-        threadHandler.createStartWithCallback(code, reduceBlocker(callbackPlayer), "http://localhost:32270/aurora_aquir/PlayerStatePath?partial=false")
-        threadHandler.createStartWithCallback(code, reduceBlocker(callbackHoldables), "http://localhost:32270/aurora_aquir/HoldableStatePath?partial=false")
-    else
-        threadHandler.createStartWithCallback(code, reduceBlocker(callbackPlayer), "http://localhost:32270/aurora_aquir/PlayerStatePath?partial=true")
-        threadHandler.createStartWithCallback(code, reduceBlocker(callbackHoldables), "http://localhost:32270/aurora_aquir/HoldableStatePath?partial=true")
-    end
+    -- if full then 
+    --     threadHandler.createStartWithCallback(code, reduceBlocker(callbackPlayer), "http://localhost:32270/aurora_aquir/PlayerStatePath?partial=false")
+    --     threadHandler.createStartWithCallback(code, reduceBlocker(callbackHoldables), "http://localhost:32270/aurora_aquir/HoldableStatePath?partial=false")
+    -- else
+    --     threadHandler.createStartWithCallback(code, reduceBlocker(callbackPlayer), "http://localhost:32270/aurora_aquir/PlayerStatePath?partial=true")
+    --     threadHandler.createStartWithCallback(code, reduceBlocker(callbackHoldables), "http://localhost:32270/aurora_aquir/HoldableStatePath?partial=true")
+    -- end
 end
 
 -- Data format:
@@ -411,18 +526,22 @@ end
 
 local function updateData(roomSwitched)
 
-    if playerData and holdableData then return end
+    -- idk what this is meant to do at all im so confused
+    --if playerData and holdableData then return end
 
     local function putData(data, isPlayer) 
-        if playerData and isPlayer then return end
-        if holdableData and not isPlayer then return end
+        -- print("[AurorasLoennPlugin/putData] Data Received: " .. dump(data) .. " isPlayer? " .. tostring(isPlayer))
+        --if playerData and isPlayer then return end
+        --if holdableData and not isPlayer then return end
         if data then
             updateSilhouettes(roomSwitched and isPlayer, data:split("\n")(), isPlayer)
         end
     end
 
+    -- print("[AurorasLoennPlugin/putData] How do we get data? " .. (DEBUGRC_FAILED and 'FILE' or 'DEBUGRC'))
+
     if not DEBUGRC_FAILED then 
-        getDataDebugRC(GET_FULL_DATA, function(event) putData(event[1], true) end, function(event) putData(event[1], false) end)
+        getDataDebugRC(GET_FULL_DATA, function(event) putData(event, true) end, function(event) putData(event, false) end)
     else
         local playerData = getData(device.PLAYER_DATA_PATH)
         local holdableData = getData(device.HOLDABLE_DATA_PATH)
@@ -524,6 +643,9 @@ local lastRoomName = nil
 local loennIsOpenCounter = 0 -- checks for debugrc every 3 seconds
 local timeCount = 0
 function device.update(dt)
+    -- update https worker jobs
+    worker.update()
+    
     --This is to tell the code in c# that we exist :D
     loennIsOpenCounter += dt
     if loennIsOpenCounter > 3 then
@@ -552,8 +674,11 @@ function device.update(dt)
     lastRoomName = selectedRoom.name
 
     
-    if not pcall(updateData, roomSwitched) then
+    -- print("[Aurora's Loenn Plugin/Updatedata] Calling update data")
+    local success, result = pcall(updateData, roomSwitched)
+    if not success then
         print("[Aurora's Loenn Plugin/SilhouetteDraw] Updating Silhouette data failed.")
+        print(result)
     end
 end
 
@@ -629,51 +754,68 @@ local function clearSilhouettes()
     device.batch:clear()
 
 
-    -- clear with debugrc hopefully
-    local code = [[
-        --require("lua_setup")
-        require("selene").load()
-        require("selene/selene/wrappers/searcher/love2d/searcher").load()
-        require("love.system")
-
-        local args = {...}
-        local channelName = unpack(args)
-        local channel = love.thread.getChannel(channelName)
-        local utils = require("utils")
-        local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
-        
-        local debugrcWorked = false
-        if hasRequest then 
-            local response = request.send("http://localhost:32270/aurora_aquir/ClearPaths", {timeout = 1}) 
-            if response then
-                local code = response.code
-
-                if code == 200 then
-                    debugrcWorked = true
-                end
-            end
-        end
-        
-        channel:push({debugrcWorked})
-    ]]
-    
-    return threadHandler.createStartWithCallback(code, function(event)
-        already_checking_loenn_open = false
-        if not event[1] then
+    worker.addTask("http://localhost:32270/aurora_aquir/ClearPaths", function(response_body)
+        if not response_body then
             -- clearing via debugRC failed we should clear the files instead
             local function clearData(path)
-                local path = utils.joinpath(fileLocations.getCelesteDir(), path);
-                local f, err = io.open(path, "w")
-                if not f then return end
-                f:write("")
-                f:close()
+                local file_path = utils.joinpath(fileLocations.getCelesteDir(), path)
+                local f = io.open(file_path, "w")
+                if f then
+                    f:write("")
+                    f:close()
+                end
             end
             clearData(device.PLAYER_DATA_PATH)
             clearData(device.HOLDABLE_DATA_PATH)
-        else 
+        else
             DEBUGRC_FAILED = false
         end
-    end)
+    end, 1)
+    -- -- clear with debugrc hopefully
+    -- local code = [[
+    --     --require("lua_setup")
+    --     require("selene").load()
+    --     require("selene/selene/wrappers/searcher/love2d/searcher").load()
+    --     require("love.system")
+
+    --     local args = {...}
+    --     local channelName = unpack(args)
+    --     local channel = love.thread.getChannel(channelName)
+    --     local utils = require("utils")
+    --     local hasRequest, request = utils.tryrequire("lib.luajit-request.luajit-request")
+        
+    --     local debugrcWorked = false
+    --     if hasRequest then 
+    --         local response = request.send("http://localhost:32270/aurora_aquir/ClearPaths", {timeout = 1}) 
+    --         if response then
+    --             local code = response.code
+
+    --             if code == 200 then
+    --                 debugrcWorked = true
+    --             end
+    --         end
+    --     end
+        
+    --     channel:push({debugrcWorked})
+    -- ]]
+    
+    -- return threadHandler.createStartWithCallback(code, function(event)
+    --     already_checking_loenn_open = false
+    --     if not event[1] then
+    --         -- clearing via debugRC failed we should clear the files instead
+    --         local function clearData(path)
+    --             local path = utils.joinpath(fileLocations.getCelesteDir(), path);
+    --             local f, err = io.open(path, "w")
+    --             if not f then return end
+    --             f:write("")
+    --             f:close()
+    --         end
+    --         clearData(device.PLAYER_DATA_PATH)
+    --         clearData(device.HOLDABLE_DATA_PATH)
+    --     else 
+    --         DEBUGRC_FAILED = false
+    --     end
+    -- end)
 
 
 end

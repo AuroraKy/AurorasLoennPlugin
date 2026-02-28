@@ -1,5 +1,5 @@
 - Name: AurorasLoennPlugin
-  Version: 0.12.4
+  Version: 0.13.0
   DLL: bin/AurorasLoennPlugin.dll
   Dependencies:
     - Name: Everest
